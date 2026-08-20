@@ -1,0 +1,11 @@
+torch>=2.2
+torchaudio>=2.2
+transformers>=4.40
+datasets>=2.18
+evaluate>=0.4.1
+numpy>=1.24
+scikit-learn>=1.3
+matplotlib>=3.7
+accelerate>=0.28
+soundfile>=0.12
+librosa>=0.10
