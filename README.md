@@ -28,6 +28,10 @@ The dataset is balanced across languages but contains only five speakers per lan
 
 The largest errors occurred between acoustically related languages, including Hindi–Urdu, Tamil–Malayalam, Nepali–Manipuri, and Punjabi–Urdu. Assamese also showed extreme speaker-level variation, supporting the speaker-shortcut hypothesis.
 
+![Language identification confusion matrix](report/figures/confusion.png)
+
+*The confusion structure exposes systematic language-family and speaker-related failure modes hidden by aggregate accuracy.*
+
 ## Repository layout
 
 ```text
