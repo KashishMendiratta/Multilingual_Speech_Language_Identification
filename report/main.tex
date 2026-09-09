@@ -64,8 +64,8 @@ The first result from EDA was that the dataset is roughly balanced by \emph{lang
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.48\columnwidth]{languagedistribution.jpeg}
-\includegraphics[width=0.48\columnwidth]{Unique_speakers.jpeg}
+\includegraphics[width=0.48\columnwidth]{figures/language_sample.png}
+\includegraphics[width=0.48\columnwidth]{figures/language_speakers.png}
 \caption{EDA summary showing language distribution and number of speakers per language.}
 \label{fig:eda}
 \end{figure}
@@ -79,7 +79,7 @@ In the analysed baseline-style run, validation accuracy was \textbf{27.7\%}, wit
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\columnwidth]{Confusion_matrix.jpeg}
+\includegraphics[width=\columnwidth]{figures/confusion.png}
 \caption{Confusion matrix for the baseline-style MMS system.}
 \label{fig:confusions}
 \end{figure}
@@ -143,7 +143,7 @@ Overall, the confusion matrix highlights two important challenges of the task: a
 Language-wise F1 scores further highlight the difficulty of the task. Some languages such as Manipuri, Malayalam and Assamese achieve relatively high F1 scores, indicating that the model can identify them reliably. This behaviour is consistent with the confusion matrix analysis and reflects the acoustic similarity between several languages in the dataset.
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.8\columnwidth]{t-SNE.jpeg}
+\includegraphics[width=0.8\columnwidth]{figures/tsne.png}
 \caption{t-SNE visualisation of the last-layer representations. This figure is useful for checking whether the embedding space groups examples more strongly by language or by speaker. Strong speaker-wise clustering would support the speaker-bias argument.}
 \label{fig:tsne}
 \end{figure}
@@ -159,13 +159,12 @@ Visualizing the embeddings therefore provides additional evidence that the model
 Overall, the project shows that the bottleneck is not just model choice. Even a strong pre-trained model struggles when each language is represented by only a handful of voices. Careful tuning and augmentation help, but they do not completely remove the shortcut.
 
 \section{Conclusion}
-In this project we investigated spoken language identification using pretrained speech transform
-ers in a challenging low-resource setting. Our baseline MMS model achieved 23.8\% validation
-accuracy, which is significantly higher than random chance but still limited by the dataset
-constraints.
-The improved model achieves a test accuracy of approximately 26.1 percent , which is
-significantly higher than the random baseline of 4.54 percent. However, the relatively low
-macro F1 score indicates that performance varies substantially across languages.
+In this project we investigated spoken language identification using pretrained speech
+transformers in a challenging low-resource setting. Our baseline-style MMS run achieved
+27.7\% validation accuracy, which is significantly higher than random chance but still limited
+by the dataset constraints. Generic augmentation reached 30.85\% validation and 31.58\% test
+accuracy, while targeted selective augmentation produced the best observed top-1 accuracy of
+43.4\%. Performance nevertheless varied substantially across languages and speakers.
 Experiments with SpecAugment and the larger XLS-R model did not improve performance,
 primarily due to the small dataset size and strong speaker bias. Both the confusion matrix
 and the t-SNE visualization suggest that the model struggles to learn robust language-specific

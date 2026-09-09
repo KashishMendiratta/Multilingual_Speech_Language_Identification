@@ -7,9 +7,7 @@ from sklearn.manifold import TSNE
 from datasets import load_dataset, Audio
 from transformers import AutoFeatureExtractor, AutoModelForAudioClassification
 
-# ===============================
-# CONFIG
-# ===============================
+
 MODEL_PATH = "./mms-300m-nnti-final-best"
 DATASET_ID = "badrex/nnti-dataset-full"
 AUDIO_COLUMN = "audio_filepath"
@@ -19,9 +17,6 @@ OUTPUT_DIR = "./evaluation_final_model"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# ===============================
-# LOAD MODEL
-# ===============================
 print("Loading model...")
 feature_extractor = AutoFeatureExtractor.from_pretrained(MODEL_PATH)
 model = AutoModelForAudioClassification.from_pretrained(MODEL_PATH)
@@ -34,9 +29,6 @@ labels = list(model.config.label2id.keys())
 label2id = model.config.label2id
 id2label = model.config.id2label
 
-# ===============================
-# LOAD DATASET
-# ===============================
 print("Loading dataset...")
 dataset = load_dataset(DATASET_ID)
 
@@ -47,9 +39,7 @@ dataset["validation"] = dataset["validation"].cast_column(
 target_sampling_rate = feature_extractor.sampling_rate
 max_length = int(target_sampling_rate * MAX_DURATION_SECONDS)
 
-# ===============================
-# FEATURE EXTRACTION
-# ===============================
+
 def preprocess(example):
     audio = example[AUDIO_COLUMN]["array"]
 
@@ -63,9 +53,6 @@ def preprocess(example):
 
     return inputs
 
-# ===============================
-# INFERENCE
-# ===============================
 all_preds = []
 all_labels = []
 embeddings = []
@@ -79,7 +66,7 @@ with torch.no_grad():
 
         inputs = {k: v.to(device) for k, v in inputs.items()}
 
-        outputs = model(**inputs)
+        outputs = model(**inputs, output_hidden_states=True)
 
         logits = outputs.logits
         pred = torch.argmax(logits, dim=-1).cpu().numpy()[0]
@@ -95,9 +82,6 @@ all_preds = np.array(all_preds)
 all_labels = np.array(all_labels)
 embeddings = np.array(embeddings)
 
-# ===============================
-# CONFUSION MATRIX
-# ===============================
 print("Generating confusion matrix...")
 
 cm = confusion_matrix(all_labels, all_preds)
@@ -124,9 +108,6 @@ plt.close()
 
 print(f"Confusion matrix saved to {conf_path}")
 
-# ===============================
-# TSNE
-# ===============================
 print("Generating t-SNE...")
 
 tsne = TSNE(

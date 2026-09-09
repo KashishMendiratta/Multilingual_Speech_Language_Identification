@@ -1,0 +1,17 @@
+.DS_Store
+.idea/
+.vscode/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+data/
+.cache/
+wandb/
+checkpoints/
+mms-300m-nnti-*/
+evaluation_final_model/
+*.safetensors
+*.pt
+*.pth

@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install test dependencies
+        run: python -m pip install numpy pytest ruff
+      - name: Lint
+        run: ruff check --select E9,F63,F7,F82 speech_lid tests train_model.py evaluate_model.py
+      - name: Test
+        run: pytest -q

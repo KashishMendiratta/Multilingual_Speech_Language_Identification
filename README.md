@@ -1,76 +1,78 @@
-# Spoken Language Identification (NNTI Project)
+# Multilingual Spoken Language Identification
 
-This project implements a spoken language identification system for 22 Indian languages using a pretrained speech transformer model.
+Fine-tuning multilingual speech transformers to identify **22 Indian languages** in a low-resource, speaker-biased dataset.
 
-The model is based on **facebook/mms-300m** and is fine-tuned on the **badrex/nnti-dataset-full** dataset.
+The project compares MMS-300M and XLS-R, studies why models learn speaker shortcuts, and evaluates targeted waveform augmentation. Selective augmentation produced the strongest experimental result: **43.4% top-1 accuracy**, compared with a **27.7% baseline-style run** and **4.54% random chance**.
 
+![Language embedding visualization](report/figures/tsne.png)
 
-# Project Structure
+## Why this project matters
 
-code/
-    train_model.py
-    evaluate_model.py
-    requirements.txt
-    README.md
-report/
-    main.tex
-    main.pdf
-    figures/
+The dataset is balanced across languages but contains only five speakers per language. That makes speaker identity an easy shortcut and turns ordinary language classification into a generalization problem. The work goes beyond aggregate accuracy by examining:
 
+- per-speaker accuracy within each language;
+- structured confusions among related languages;
+- MMS-300M versus XLS-R fine-tuning;
+- frozen and unfrozen encoder strategies;
+- noise, gain, shift, replacement, addition, and selective augmentation;
+- confusion matrices and t-SNE representations.
 
----
+## Results
 
-# Installation
+| Experiment | Accuracy | Takeaway |
+| --- | ---: | --- |
+| Random classifier | 4.54% | 22-way chance level |
+| Baseline-style MMS run | 27.7% validation | Strong speaker and language-family confusions |
+| Generic augmentation | 30.85% validation / 31.58% test | Modest improvement |
+| Selective augmentation | **43.4% top-1** | Targeting confused languages worked best |
 
-Create a Python environment and install dependencies:
+The largest errors occurred between acoustically related languages, including Hindi–Urdu, Tamil–Malayalam, Nepali–Manipuri, and Punjabi–Urdu. Assamese also showed extreme speaker-level variation, supporting the speaker-shortcut hypothesis.
 
-pip install -r requirements.txt
+## Repository layout
 
-# Training
+```text
+speech_lid/       Reusable audio augmentation functions
+train_model.py    Reproducible MMS-300M training pipeline
+evaluate_model.py Confusion-matrix and embedding evaluation
+experiments/      Baseline, augmentation, tuning, and XLS-R experiments
+notebooks/        Exploratory data analysis
+tests/            Lightweight deterministic unit tests
+report/           Full paper, figures, and compiled PDF
+docs/             Project presentation
+```
 
-Run the training script:
-    python train_model.py
+## Setup
 
-The trained model will be saved to:
-./mms-300m-nnti-final-best
+Python 3.11 is recommended. A CUDA-capable GPU is strongly recommended for training.
 
-# Evaluation
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
 
-Generate evaluation plots:
-    python evaluate_model.py
+The training pipeline downloads [`badrex/nnti-dataset-full`](https://huggingface.co/datasets/badrex/nnti-dataset-full) and [`facebook/mms-300m`](https://huggingface.co/facebook/mms-300m) from Hugging Face.
 
-This script produces:
-- Confusion matrix
-- t-SNE visualization of embeddings
+## Train and evaluate
 
-Outputs are saved to:
-./evaluation_final_model/
+```bash
+python train_model.py
+python evaluate_model.py
+```
 
-# Dataset
+Training writes the best checkpoint to `mms-300m-nnti-final-best/`. Evaluation reads that checkpoint and writes a confusion matrix and t-SNE plot to `evaluation_final_model/`.
 
-Dataset used:
-badrex/nnti-dataset-full
-Available on HuggingFace:
-https://huggingface.co/datasets/badrex/nnti-dataset-full
+## Reproducibility and limitations
 
-The dataset contains speech recordings for 22 Indian languages, with approximately 400 samples per language and five speakers per language, creating a challenging speaker bias scenario.
+- The canonical training configuration uses 16 kHz audio clipped to seven seconds.
+- The encoder feature extractor is frozen and the classification layers are reinitialized.
+- Augmentation is probabilistic; fix Python and NumPy seeds for exact experiment replication.
+- Reported metrics come from the documented coursework experiments rather than a hosted production model.
+- With only five speakers per language, these results should not be interpreted as broad real-world language coverage.
 
-# Model
+For methodology, ablations, and detailed error analysis, see the [full report](report/main.pdf).
 
-Pretrained model:
-facebook/mms-300m
+## Authors
 
-A multilingual speech model based on the Wav2Vec2 transformer architecture.
-
-## Key Features
-
-- Pretrained speech transformer
-- Fine-tuning for language classification
-- Feature encoder freezing to reduce overfitting
-- Custom audio preprocessing pipeline
-- Confusion matrix analysis
-- t-SNE visualization of learned embeddings
-
-# Authors
-Muhammad Saqib (7075880)
-Kashish Mendiratta (7022904)
+Kashish Mendiratta and Muhammad Saqib — Saarland University, Neural Networks: Theory and Implementation, Winter 2025–26.

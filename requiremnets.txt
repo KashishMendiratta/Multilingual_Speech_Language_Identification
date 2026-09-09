@@ -1,9 +1,0 @@
-torch>=2.0
-transformers>=4.36
-datasets>=2.14
-evaluate
-numpy
-scikit-learn
-matplotlib
-accelerate
-soundfile

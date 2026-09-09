@@ -1,255 +1,292 @@
-from datetime import datetime
-current_time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-print(f"Current time: {current_time_str}")
-
 import os
-import numpy as np
-import torch
+from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from datasets import load_dataset, Audio
-
-from transformers import (
-    AutoModelForAudioClassification,
-    AutoFeatureExtractor,
-    AutoConfig,
-    TrainingArguments,
-    Trainer
-)
-
+import torch
+import torch.nn as nn
+import numpy as np
 import evaluate
+import matplotlib
 
-print("Check if GPU available:")
-print("torch.cuda.is_available():", torch.cuda.is_available())
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print("Using device:", device)
-
-# ===============================
-# MODEL
-# ===============================
-
-model_id = "facebook/mms-300m"
-
-feature_extractor = AutoFeatureExtractor.from_pretrained(
-    model_id,
-    do_normalize=True,
-    return_attention_mask=True
+from datasets import load_dataset, Audio, ClassLabel
+from transformers import (
+    AutoConfig,
+    AutoFeatureExtractor,
+    AutoModelForAudioClassification,
+    TrainingArguments,
+    Trainer,
 )
 
-# ===============================
-# DATASET
-# ===============================
+from speech_lid.augmentation import maybe_augment
+
+
+BASE_MODEL = "facebook/mms-300m"
+HF_DATASET = "badrex/nnti-dataset-full"
+AUDIO_FIELD = "audio_filepath"
+LABEL_FIELD = "language"
+CLIP_SECONDS = 7
+
+# only these languages will be augmented for selective augmentation based on previous analysis
+AUGMENT_LANGS = {
+    "hindi",
+    "urdu",
+    "tamil",
+    "malayalam",
+    "manipuri",
+    "punjabi",
+    "nepali",
+}
+
 
 print("Loading dataset...")
-dataset = load_dataset("badrex/nnti-dataset-full")
+raw_data = load_dataset(HF_DATASET)
 
-train_ds = dataset["train"].shuffle(seed=42)
-valid_ds = dataset["validation"].shuffle(seed=42)
+for split_name in ["train", "validation"]:
+    raw_data[split_name] = raw_data[split_name].cast_column(
+        AUDIO_FIELD,
+        Audio(sampling_rate=16000),
+    )
 
-train_ds = train_ds.cast_column(
-    "audio_filepath",
-    Audio(sampling_rate=16000)
+label_names = sorted(raw_data["train"].unique(LABEL_FIELD))
+for split_name in ["train", "validation"]:
+    raw_data[split_name] = raw_data[split_name].cast_column(
+        LABEL_FIELD,
+        ClassLabel(names=label_names),
+    )
+
+train_ds = raw_data["train"]
+valid_ds = raw_data["validation"]
+
+id2label = dict(enumerate(train_ds.features[LABEL_FIELD].names))
+label2id = {name: idx for idx, name in id2label.items()}
+n_classes = len(id2label)
+
+feature_processor = AutoFeatureExtractor.from_pretrained(
+    BASE_MODEL,
+    do_normalize=True,
+    return_attention_mask=True,
 )
 
-valid_ds = valid_ds.cast_column(
-    "audio_filepath",
-    Audio(sampling_rate=16000)
-)
+sample_rate = feature_processor.sampling_rate
+max_audio_len = int(sample_rate * CLIP_SECONDS)
 
-LABELS = train_ds.unique("language")
-str_to_int = {s: i for i, s in enumerate(LABELS)}
-int_to_str = {i: s for s, i in str_to_int.items()}
 
-print("Languages:", LABELS)
+def prepare_train_batch(batch):
+    waveforms = []
+    lang_ids = batch[LABEL_FIELD]
 
-input_features_key = "input_values"
-max_duration = 7
+    for audio_obj, lang_id in zip(batch[AUDIO_FIELD], lang_ids):
+        wav = audio_obj["array"].astype(np.float32)
+        lang_name = id2label[int(lang_id)]
+        wav = maybe_augment(wav, lang_name, AUGMENT_LANGS)
+        waveforms.append(wav)
 
-# ===============================
-# PREPROCESS
-# ===============================
-
-def preprocess_function(examples):
-
-    audio_arrays = [x["array"] for x in examples["audio_filepath"]]
-
-    inputs = feature_extractor(
-        audio_arrays,
-        sampling_rate=feature_extractor.sampling_rate,
+    processed = feature_processor(
+        waveforms,
+        sampling_rate=sample_rate,
+        max_length=max_audio_len,
         truncation=True,
-        max_length=int(feature_extractor.sampling_rate * max_duration),
         return_attention_mask=True,
     )
 
-    inputs["label"] = [str_to_int[x] for x in examples["language"]]
-
-    inputs[input_features_key] = [
-        np.array(x) for x in inputs[input_features_key]
-    ]
-
-    return inputs
+    processed["labels"] = lang_ids
+    processed["length"] = [len(x) for x in processed["input_values"]]
+    return processed
 
 
-keep_cols = ["speaker_id", "language"]
+def prepare_eval_batch(batch):
+    waveforms = [audio_obj["array"].astype(np.float32) for audio_obj in batch[AUDIO_FIELD]]
 
-print("Preprocessing dataset...")
+    processed = feature_processor(
+        waveforms,
+        sampling_rate=sample_rate,
+        max_length=max_audio_len,
+        truncation=True,
+        return_attention_mask=True,
+    )
 
-train_ds_encoded = train_ds.map(
-    preprocess_function,
-    remove_columns=[c for c in train_ds.column_names if c not in keep_cols],
+    processed["labels"] = batch[LABEL_FIELD]
+    processed["length"] = [len(x) for x in processed["input_values"]]
+    return processed
+
+
+print("Preprocessing train/validation splits...")
+train_encoded = train_ds.map(
+    prepare_train_batch,
     batched=True,
-    batch_size=32,
-    num_proc=6
+    remove_columns=train_ds.column_names,
 )
 
-valid_ds_encoded = valid_ds.map(
-    preprocess_function,
-    remove_columns=[c for c in valid_ds.column_names if c not in keep_cols],
+valid_encoded = valid_ds.map(
+    prepare_eval_batch,
     batched=True,
-    batch_size=32,
-    num_proc=6
+    remove_columns=valid_ds.column_names,
 )
 
-# ===============================
-# MODEL CONFIG
-# ===============================
+print("Example label:", train_encoded[0]["labels"])
+print("Max label id:", max(train_encoded["labels"]))
+print("Total classes:", n_classes)
 
-config = AutoConfig.from_pretrained(model_id)
 
-config.num_labels = len(int_to_str)
-config.label2id = str_to_int
-config.id2label = int_to_str
+@dataclass
+class AudioBatchCollator:
+    processor: Any
 
-slid_model = AutoModelForAudioClassification.from_pretrained(
-    model_id,
-    config=config
-)
+    def __call__(self, samples: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
+        audio_part = [
+            {
+                "input_values": sample["input_values"],
+                "attention_mask": sample["attention_mask"],
+            }
+            for sample in samples
+        ]
+        targets = [sample["labels"] for sample in samples]
 
-# ===============================
-# COLLATOR
-# ===============================
-
-class AudioDataCollator:
-
-    def __init__(self, feature_extractor):
-        self.feature_extractor = feature_extractor
-
-    def __call__(self, features: List[Dict[str, Any]]):
-
-        batch = {
-            input_features_key: [f[input_features_key] for f in features],
-            "attention_mask": [f["attention_mask"] for f in features]
-        }
-
-        batch = self.feature_extractor.pad(
-            batch,
+        batch = self.processor.pad(
+            audio_part,
             padding=True,
-            return_tensors="pt"
+            return_tensors="pt",
         )
-
-        batch["labels"] = torch.tensor(
-            [f["label"] for f in features],
-            dtype=torch.long
-        )
-
+        batch["labels"] = torch.tensor(targets, dtype=torch.long)
         return batch
 
 
-data_collator = AudioDataCollator(feature_extractor)
+collator = AudioBatchCollator(processor=feature_processor)
 
-# ===============================
-# TRAINING
-# ===============================
+print("Building model...")
+cfg = AutoConfig.from_pretrained(BASE_MODEL)
+cfg.num_labels = n_classes
+cfg.label2id = label2id
+cfg.id2label = id2label
 
-batch_size = 8
-gradient_accumulation_steps = 4
-num_train_epochs = 6
-lr = 2e-5
-
-training_args = TrainingArguments(
-
-    output_dir="./results",
-
-    per_device_train_batch_size=batch_size,
-    per_device_eval_batch_size=batch_size,
-
-    gradient_accumulation_steps=gradient_accumulation_steps,
-
-    num_train_epochs=num_train_epochs,
-
-    learning_rate=lr,
-    weight_decay=0.01,
-    warmup_ratio=0.1,
-
-    logging_steps=50,
-
-    evaluation_strategy="steps",
-    eval_steps=200,
-
-    save_strategy="steps",
-    save_steps=200,
-
-    save_total_limit=2,
-
-    load_best_model_at_end=True,
-
-    metric_for_best_model="accuracy",
-    greater_is_better=True,
-
-    fp16=True,
-
-    dataloader_num_workers=4,
-
-    report_to="none"
+model = AutoModelForAudioClassification.from_pretrained(
+    BASE_MODEL,
+    config=cfg,
+    ignore_mismatched_sizes=True,
 )
 
-# ===============================
-# METRICS
-# ===============================
+model.freeze_feature_encoder()
 
-accuracy_metric = evaluate.load("accuracy")
+if hasattr(model, "projector"):
+    nn.init.normal_(model.projector.weight, mean=0.0, std=0.02)
+    if model.projector.bias is not None:
+        nn.init.zeros_(model.projector.bias)
 
-def compute_metrics(eval_pred):
+if hasattr(model, "classifier"):
+    nn.init.normal_(model.classifier.weight, mean=0.0, std=0.02)
+    if model.classifier.bias is not None:
+        nn.init.zeros_(model.classifier.bias)
 
-    predictions = np.argmax(eval_pred.predictions, axis=1)
+print(f"Head reset done. Expected initial loss ~ {np.log(n_classes):.2f}")
 
-    return accuracy_metric.compute(
-        predictions=predictions,
-        references=eval_pred.label_ids
-    )
+metric_acc = evaluate.load("accuracy")
 
-# ===============================
-# TRAINER
-# ===============================
+
+def metric_fn(eval_pred):
+    logits, gold = eval_pred
+    pred_ids = np.argmax(logits, axis=-1)
+    return metric_acc.compute(predictions=pred_ids, references=gold)
+
+
+train_args = TrainingArguments(
+    output_dir="./mms-300m-nnti-finetuned",
+    save_strategy="steps",
+    save_steps=600,
+    eval_strategy="steps",
+    eval_steps=300,
+    learning_rate=2e-5,
+    per_device_train_batch_size=64,
+    per_device_eval_batch_size=64,
+    gradient_accumulation_steps=1,
+    num_train_epochs=20,
+    warmup_steps=100,
+    logging_steps=50,
+    save_total_limit=1,
+    load_best_model_at_end=True,
+    metric_for_best_model="eval_loss",
+    greater_is_better=False,
+    fp16=False,
+    weight_decay=0.01,
+)
 
 trainer = Trainer(
-    model=slid_model,
-    args=training_args,
-    train_dataset=train_ds_encoded,
-    eval_dataset=valid_ds_encoded,
-    tokenizer=feature_extractor,
-    data_collator=data_collator,
-    compute_metrics=compute_metrics
+    model=model,
+    args=train_args,
+    train_dataset=train_encoded,
+    eval_dataset=valid_encoded,
+    processing_class=feature_processor,
+    data_collator=collator,
+    compute_metrics=metric_fn,
 )
 
-print("Training starting...")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
 
+for mini_batch in trainer.get_train_dataloader():
+    mini_batch = {k: v.to(device) for k, v in mini_batch.items()}
+    with torch.no_grad():
+        out = model(**mini_batch)
+    print("Initial loss:", out.loss.item())
+    break
+
+
+print("Starting training...")
 trainer.train()
+print("Training finished. Best checkpoint has been loaded.")
 
-print("Final evaluation...")
+save_path = "./mms-300m-nnti-final-best"
+trainer.save_model(save_path)
+print(f"\nSaved best model to {save_path}")
 
-trainer.evaluate()
 
-# ===============================
-# SAVE MODEL
-# ===============================
+plot_dir = "./evaluation_train_mms-300m-nnti-final-best"
+os.makedirs(plot_dir, exist_ok=True)
 
-save_dir = "./indic-SLID/inprogress"
+logs = trainer.state.log_history
 
-os.makedirs(save_dir, exist_ok=True)
+train_loss_log = [
+    (entry["step"], entry["loss"])
+    for entry in logs
+    if "loss" in entry and "eval_loss" not in entry
+]
 
-slid_model.save_pretrained(save_dir)
+eval_log = [entry for entry in logs if "eval_loss" in entry]
 
-print("Training finished.")
+eval_epochs = [entry["epoch"] for entry in eval_log]
+eval_losses = [entry["eval_loss"] for entry in eval_log]
+eval_accs = [entry.get("eval_accuracy") for entry in eval_log]
+
+fig, ax = plt.subplots(figsize=(8, 5))
+
+if train_loss_log:
+    step_ids, train_losses = zip(*train_loss_log)
+    ax.plot(step_ids, train_losses, label="Train loss", alpha=0.7)
+
+ax.plot(eval_epochs, eval_losses, marker="o", label="Validation loss")
+ax.set_xlabel("Step / Epoch")
+ax.set_ylabel("Loss")
+ax.set_title("Training and Validation Loss")
+ax.grid(True)
+ax.legend()
+fig.tight_layout()
+fig.savefig(os.path.join(plot_dir, "loss_curve.png"), dpi=150)
+plt.close(fig)
+
+print(f"Saved loss plot to {plot_dir}/loss_curve.png")
+
+if any(score is not None for score in eval_accs):
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(eval_epochs, eval_accs, marker="o", label="Validation accuracy")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Accuracy")
+    ax.set_title("Validation Accuracy")
+    ax.grid(True)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(os.path.join(plot_dir, "accuracy_curve.png"), dpi=150)
+    plt.close(fig)
+
+    print(f"Saved accuracy plot to {plot_dir}/accuracy_curve.png")
